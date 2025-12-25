@@ -203,34 +203,14 @@ class MainWindow(ctk.CTk):
         )
         self.btn_export_excel.pack(side="left", padx=5)
         
-        self.btn_view_errors = ctk.CTkButton(
-            export_frame,
-            text="👁 View Errors",
-            command=self._view_errors,
-            width=120,
-            state="disabled",
-            fg_color="orange",
-            hover_color="darkorange"
-        )
-        self.btn_view_errors.pack(side="left", padx=5)
-
-        self.btn_inspect = ctk.CTkButton(
-            export_frame,
-            text="🔍 Inspect In-App",
-            command=self._inspect_pdf,
-            width=120,
-            state="disabled",
-            fg_color="#00695c",
-            hover_color="#004d40"
-        )
-        self.btn_inspect.pack(side="left", padx=5)
+        # NOTE: View Errors and Inspect buttons are now per-result in the scrollable list below
         
-        # Results text area
-        self.results_text = ctk.CTkTextbox(
+        # Results scrollable area
+        self.results_list = ctk.CTkScrollableFrame(
             results_frame,
-            font=("Consolas", 11)
+            fg_color="transparent"
         )
-        self.results_text.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        self.results_list.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
     
     def _create_statusbar(self):
         """Create status bar"""
@@ -302,7 +282,8 @@ class MainWindow(ctk.CTk):
         logger.info(f"Starting scan of {len(self.selected_files)} files")
         
         # Clear results
-        self.results_text.delete("1.0", "end")
+        for widget in self.results_list.winfo_children():
+            widget.destroy()
         self.current_job = None
         
         # Disable export buttons
@@ -331,8 +312,6 @@ class MainWindow(ctk.CTk):
             self.after(0, self._update_status, "Scan complete!")
             self.after(0, lambda: self.btn_export_html.configure(state="normal"))
             self.after(0, lambda: self.btn_export_excel.configure(state="normal"))
-            self.after(0, lambda: self.btn_view_errors.configure(state="normal"))
-            self.after(0, lambda: self.btn_inspect.configure(state="normal"))
             
         except Exception as e:
             logger.error(f"Scan failed: {e}", exc_info=True)
@@ -348,43 +327,89 @@ class MainWindow(ctk.CTk):
         self.after(0, self._update_status, f"Scanning: {filename}")
     
     def _display_results(self, job: ScanJob):
-        """Display scan results in text area"""
-        self.results_text.delete("1.0", "end")
+        """Display scan results in scrollable list"""
+        # Clear existing
+        for widget in self.results_list.winfo_children():
+            widget.destroy()
+            
+        # Summary Header
+        summary_frame = ctk.CTkFrame(self.results_list, fg_color=("gray90", "gray15"))
+        summary_frame.pack(fill="x", padx=10, pady=(10, 20))
         
-        # Summary
-        self.results_text.insert("end", "=" * 80 + "\n")
-        self.results_text.insert("end", "SCAN RESULTS SUMMARY\n")
-        self.results_text.insert("end", "=" * 80 + "\n\n")
-        self.results_text.insert("end", f"Total PDFs Scanned: {job.total_files}\n")
-        self.results_text.insert("end", f"Compliant: {job.compliant_count}\n")
-        self.results_text.insert("end", f"Non-Compliant: {job.non_compliant_count}\n")
-        self.results_text.insert("end", f"Errors: {job.error_count}\n")
-        self.results_text.insert("end", f"Success Rate: {job.success_rate:.1f}%\n")
-        self.results_text.insert("end", f"Duration: {job.duration_seconds:.2f} seconds\n\n")
-        
-        # Details
-        self.results_text.insert("end", "=" * 80 + "\n")
-        self.results_text.insert("end", "DETAILED RESULTS\n")
-        self.results_text.insert("end", "=" * 80 + "\n\n")
-        
+        ctk.CTkLabel(
+            summary_frame, 
+            text=f"Total: {job.total_files} | Compliant: {job.compliant_count} | Non-Compliant: {job.non_compliant_count} | Success: {job.success_rate:.1f}%",
+            font=("Segoe UI", 14, "bold")
+        ).pack(side="left", padx=20, pady=15)
+
+        # Individual Results
         for result in job.results:
-            self.results_text.insert("end", f"File: {result.filename}\n")
-            self.results_text.insert("end", f"Status: {result.status}\n")
-            self.results_text.insert("end", f"Profile: {result.profile}\n")
-            self.results_text.insert("end", f"Violations: {result.total_violations}\n")
+            self._add_result_row(result)
+
+    def _add_result_row(self, result: PDFResult):
+        """Add a single result row to the scrollable frame"""
+        row = ctk.CTkFrame(self.results_list, fg_color=("white", "gray20"))
+        row.pack(fill="x", padx=10, pady=5)
+        
+        # Status Icon/Label
+        status_color = "green" if result.compliant else "red"
+        status_text = "✓" if result.compliant else "✗"
+        
+        status_lbl = ctk.CTkLabel(
+            row, 
+            text=status_text, 
+            text_color=status_color,
+            font=("Segoe UI", 20, "bold"),
+            width=40
+        )
+        status_lbl.pack(side="left", padx=(10, 5))
+        
+        # Filename and Violation count
+        info_frame = ctk.CTkFrame(row, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, padx=10)
+        
+        ctk.CTkLabel(
+            info_frame, 
+            text=result.filename,
+            font=("Segoe UI", 13, "bold"),
+            anchor="w"
+        ).pack(fill="x", pady=(5, 0))
+        
+        violation_text = f"{result.total_violations} Violations" if not result.compliant else "Full Compliance"
+        if result.error:
+            violation_text = f"Error: {result.error}"
             
-            if result.violations:
-                self.results_text.insert("end", "\nViolations:\n")
-                for v in result.violations[:5]:
-                    self.results_text.insert("end", f"  - {v.rule_id}: {v.description}\n")
-                    self.results_text.insert("end", f"    ({v.failed_checks} failed checks)\n")
-                if len(result.violations) > 5:
-                    self.results_text.insert("end", f"  ... and {len(result.violations) - 5} more\n")
+        ctk.CTkLabel(
+            info_frame, 
+            text=violation_text,
+            font=("Segoe UI", 11),
+            text_color="gray",
+            anchor="w"
+        ).pack(fill="x", pady=(0, 5))
+        
+        # Action Buttons
+        if not result.compliant and result.violations:
+            btn_view = ctk.CTkButton(
+                row,
+                text="👁 View Annotations",
+                command=lambda r=result: self._view_errors(r),
+                width=140,
+                height=32,
+                fg_color="orange",
+                hover_color="darkorange"
+            )
+            btn_view.pack(side="right", padx=5, pady=10)
             
-            if result.error:
-                self.results_text.insert("end", f"Error: {result.error}\n")
-            
-            self.results_text.insert("end", "\n" + "-" * 80 + "\n\n")
+        btn_inspect = ctk.CTkButton(
+            row,
+            text="🔍 Inspect In-App",
+            command=lambda r=result: self._inspect_pdf(r),
+            width=140,
+            height=32,
+            fg_color="#00695c",
+            hover_color="#004d40"
+        )
+        btn_inspect.pack(side="right", padx=(5, 15), pady=10)
     
     def _export_html(self):
         """Export results to HTML and open in browser"""
@@ -432,25 +457,13 @@ class MainWindow(ctk.CTk):
             logger.error(f"Failed to export Excel: {e}", exc_info=True)
             messagebox.showerror("Export Error", f"Failed to export Excel:\n\n{str(e)}")
     
-    def _view_errors(self):
-        """Annotate and view errors in PDF"""
-        if not self.current_job or not self.current_job.results:
-            return
-            
-        # Find first non-compliant result for now
-        # In a full app, we'd let user select which file
-        target_result = None
-        for result in self.current_job.results:
-            if not result.compliant and result.violations:
-                target_result = result
-                break
-        
+    def _view_errors(self, target_result: PDFResult):
+        """Annotate and view errors in PDF for a specific result"""
         if not target_result:
-            messagebox.showinfo("Info", "No violations found to visualize.")
             return
             
         try:
-            self._update_status(f"Generatign annotations for {target_result.filename}...")
+            self._update_status(f"Generating annotations for {target_result.filename}...")
             
             # Run in thread to not freeze UI
             def run_annotate():
@@ -472,23 +485,11 @@ class MainWindow(ctk.CTk):
             logger.error(f"Failed to initiate annotation: {e}")
             messagebox.showerror("Error", str(e))
     
-    def _inspect_pdf(self):
-        """Open integrated PDF viewer"""
-        if not self.current_job or not self.current_job.results:
-            return
-            
-        # Find result to inspect (simplification: just first non-compliant or first)
-        target = None
-        for r in self.current_job.results:
-            if not r.compliant:
-                target = r
-                break
-        if not target:
-            target = self.current_job.results[0]
-            
+    def _inspect_pdf(self, target: PDFResult):
+        """Open integrated PDF viewer for a specific result"""
         if not target:
             return
-
+            
         # Hide main frame, show viewer
         self.main_frame.grid_remove()
         

@@ -21,6 +21,7 @@ class PDFViewerFrame(ctk.CTkFrame):
         self.zoom_level = 1.0
         self.current_result: Any = None
         self.violations_by_page = {}
+        self.highlight_node = None # For structure tags
         
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=0) # Right panel for structure
@@ -163,11 +164,12 @@ class PDFViewerFrame(ctk.CTkFrame):
                     err_btn = ctk.CTkButton(
                         self.error_tree,
                         text=f"⚠ {rule}",
-                        font=("Segoe UI", 11),
-                        fg_color=("#ffeb3b", "#3e2723") if v.failed_checks > 1 else ("#ffebee", "#3e2723"),
-                        text_color=("black", "white"), 
+                        font=("Segoe UI", 11, "bold"),
+                        fg_color=("#ef5350", "#c62828") if v.failed_checks > 1 else ("#B3E5FC", "#0288D1"),
+                        hover_color=("#e53935", "#b71c1c") if v.failed_checks > 1 else ("#81D4FA", "#0277BD"),
+                        text_color="white" if v.failed_checks > 1 else ("black", "white"), 
                         anchor="w",
-                        height=24,
+                        height=26,
                         command=lambda p=p_idx, viol=v: self.focus_error(p, viol)
                     )
                     err_btn.pack(fill="x", padx=(15, 2), pady=1)
@@ -203,16 +205,17 @@ class PDFViewerFrame(ctk.CTkFrame):
         # 2. Fallback to Document Outline (Bookmarks/TOC) if no tags found
         if not found_structure:
             try:
-                outline = self.doc.get_outline_xrefs()
-                if outline:
-                    logger.info("Logical tags not found. Falling back to Document Outline (Bookmarks)...")
+                toc = self.doc.get_toc()
+                if toc:
+                    logger.info("Logical tags not found. Falling back to Table of Contents...")
                     ctk.CTkLabel(
                         self.struct_tree, 
-                        text="Tags not found. Showing Outline:", 
+                        text="Tags not found. Showing TOC:", 
                         font=("Segoe UI", 11, "italic"),
                         text_color="gray"
                     ).pack(pady=(0, 5), fill="x")
-                    self._add_outline_node(outline, 0)
+                    for level, title, page in toc:
+                        self._add_toc_node(title, page - 1, level)
                     found_structure = True
             except Exception as e:
                 logger.warning(f"Failed to get document outline: {e}")
@@ -226,7 +229,7 @@ class PDFViewerFrame(ctk.CTkFrame):
             ).pack(pady=20)
 
     def _add_structure_node(self, node, level):
-        """Recursively add structure nodes to the UI"""
+        """Recursively add structure nodes to the UI with improved styling"""
         if not node: return
         
         tag = node.get("tag", "Unknown")
@@ -234,62 +237,51 @@ class PDFViewerFrame(ctk.CTkFrame):
         xref = node.get("xref", -1)
         text = f"{tag}" + (f": {title[:20]}" if title else "")
         
-        # Determine color based on tag type
-        color = ("gray10", "gray90")
+        # Determine color/styling based on tag type
+        # Light mode: Dark Indigo/Green/Red
+        # Dark mode: Light Blue/Light Green/Light Red
+        color = ("#333333", "#E0E0E0")
         if tag in ["H1", "H2", "H3", "H4", "H5", "H6"]:
-            color = ("#1a237e", "#9fa8da") # Indigo
+            color = ("#1565C0", "#90CAF9") # Blue/Light Blue
+        elif tag in ["Table", "THead", "TBody", "TR", "TD"]:
+            color = ("#2E7D32", "#A5D6A7") # Green/Light Green
         elif tag == "Figure":
-            color = ("#1b5e20", "#a5d6a7") # Green
+            color = ("#C62828", "#EF5350") # Red/Light Red
         
         btn = ctk.CTkButton(
             self.struct_tree,
             text=text,
             fg_color="transparent",
+            hover_color=("gray85", "gray30"),
             text_color=color,
             anchor="w",
-            font=("Segoe UI", 11),
-            height=22,
+            font=("Segoe UI", 11, "bold"),
+            height=24,
+            command=lambda n=node: self.focus_tag(n),
             state="normal" 
         )
-        btn.pack(fill="x", padx=(level * 12, 2), pady=0)
-        
-        # Add tooltips or click events if needed using xref
+        btn.pack(fill="x", padx=(level * 15, 2), pady=0)
         
         # Add children
         children = node.get("children", [])
         for child in children:
             self._add_structure_node(child, level + 1)
 
-    def _add_outline_node(self, node, level):
-        """Recursively add outline (bookmarks) to the UI"""
-        if not node: return
-        
-        # Outline is a linked list or nested list depending on how it's retrieved
-        # PyMuPDF get_outline() returns a generator of (level, title, page, ...)
-        # Wait, get_outline() returns the first node of a linked list structure
-        
-        curr = node
-        while curr:
-            title = curr.title
-            page_num = curr.page
-            
-            btn = ctk.CTkButton(
-                self.struct_tree,
-                text=f"🔖 {title}",
-                fg_color="transparent",
-                text_color=("gray10", "gray90"),
-                anchor="w",
-                font=("Segoe UI", 11),
-                height=22,
-                command=lambda p=page_num: self.go_to_page(p)
-            )
-            btn.pack(fill="x", padx=(level * 15, 2), pady=0)
-            
-            # Recurse into children
-            if curr.down:
-                self._add_outline_node(curr.down, level + 1)
-            
-            curr = curr.next
+    def _add_toc_node(self, title, page_idx, level):
+        """Adds a TOC entry to the UI with nice styling"""
+        btn = ctk.CTkButton(
+            self.struct_tree,
+            text=f"🔖 {title}",
+            fg_color="transparent",
+            hover_color=("gray85", "gray30"),
+            text_color=("gray10", "gray90"),
+            anchor="w",
+            font=("Segoe UI", 11, "bold"),
+            height=24,
+            command=lambda p=page_idx: self.go_to_page(p)
+        )
+        btn.pack(fill="x", padx=((level - 1) * 15, 2), pady=1)
+
 
     def go_to_page(self, page_idx):
         if 0 <= page_idx < len(self.doc):
@@ -309,8 +301,17 @@ class PDFViewerFrame(ctk.CTkFrame):
 
     def focus_error(self, page_idx, violation):
         """Switch to page and highlight specific error"""
+        self.highlight_node = None # Clear tag highlight
         self.current_page_idx = page_idx
         self._render_page(highlight_violation=violation)
+
+    def focus_tag(self, node):
+        """Switch to page and highlight specific structure tag"""
+        self.highlight_node = node
+        pg_idx = node.get("page", -1)
+        if pg_idx >= 0:
+            self.current_page_idx = pg_idx
+        self._render_page()
 
     def _render_page(self, highlight_violation=None):
         """Render current page to image"""
@@ -350,6 +351,21 @@ class PDFViewerFrame(ctk.CTkFrame):
                  # If focused but no rect, show text overlay?
                  if is_focused and not rects:
                       draw.text((10, 10), "Global/Structure Error - Location not visual", fill="red")
+
+        # Draw Tag Highlight
+        if self.highlight_node:
+            from utils.pdf_utils import map_mcids_to_rects
+            mcids = self.highlight_node.get("mcids", [])
+            tag_rects = map_mcids_to_rects(page, mcids)
+            
+            if tag_rects:
+                for r in tag_rects:
+                    scaled_r = [c * self.zoom_level for c in r]
+                    draw.rectangle(scaled_r, fill=(0, 100, 255, 100), outline=(0, 100, 255, 255), width=3)
+            else:
+                # If no MCID rects, show a hint
+                tag_name = self.highlight_node.get('tag', 'Unknown')
+                draw.text((10, 10), f"Tag: {tag_name} - Selection shown in structure tree", fill="blue")
 
         # Display
         ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(pix.width, pix.height))

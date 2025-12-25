@@ -95,17 +95,14 @@ def resolve_violation_page(violation: Any, doc: fitz.Document, xref_map: Dict[in
 def get_logical_structure(doc: fitz.Document) -> List[Dict[str, Any]]:
     """
     Extract logical structure (Tags) from PDF manually using low-level XREF access.
-    This replaces the unreliable veraPDF feature extraction.
     """
     try:
         cat_xref = doc.pdf_catalog()
         st_root_val = doc.xref_get_key(cat_xref, "StructTreeRoot")
         
         if st_root_val[0] != 'xref':
-            logger.info("No /StructTreeRoot found in PDF catalog.")
             return []
             
-        # Extract the integer part of '123 0 R'
         root_xref = int(st_root_val[1].split()[0])
         return _parse_kids(doc, root_xref)
     except Exception as e:
@@ -123,28 +120,62 @@ def _parse_kids(doc: fitz.Document, parent_xref: int) -> List[Dict[str, Any]]:
         if elem: kids.append(elem)
     elif val[0] == 'array':
         import re
-        # Find all object references like '123 0 R'
-        xref_ids = re.findall(r'(\d+)\s+0\s+R', val[1])
-        for xid in xref_ids:
-            elem = _parse_struct_elem(doc, int(xid))
-            if elem: kids.append(elem)
+        # Check if it's an array of integers (MCIDs) or object references
+        if 'R' not in val[1]:
+            # Likely MCIDs: [0 1 2 3]
+            mcids = [int(x) for x in re.findall(r'\d+', val[1])]
+            # For simpler UI, we treat MCIDs as children nodes if they are direct kids of root
+            # but usually MCIDs are kids of a StructElem.
+            # We'll return them as a special key in the parent instead of separate nodes.
+            pass
+        else:
+            xref_ids = re.findall(r'(\d+)\s+0\s+R', val[1])
+            for xid in xref_ids:
+                elem = _parse_struct_elem(doc, int(xid))
+                if elem: kids.append(elem)
+    elif val[0] == 'int':
+        # Single MCID
+        pass
     
     return kids
 
 def _parse_struct_elem(doc: fitz.Document, xref: int) -> Optional[Dict[str, Any]]:
-    """Parse a single /StructElem object"""
+    """Parse a single /StructElem object and its content items"""
     try:
         # Get Tag (Subtype)
         s_val = doc.xref_get_key(xref, "S")
-        if s_val[0] == 'name':
-            tag = s_val[1].strip('/')
-        else:
-            tag = "Unknown"
+        tag = s_val[1].strip('/') if s_val[0] == 'name' else "Unknown"
             
         # Get Title
         t_val = doc.xref_get_key(xref, "T")
         title = t_val[1] if t_val[0] in ['string', 'text'] else ""
         
+        # Get Page Reference
+        pg_val = doc.xref_get_key(xref, "Pg")
+        page_idx = -1
+        if pg_val[0] == 'xref':
+            pg_xref = int(pg_val[1].split()[0])
+            # Resolve page index from xref
+            for i in range(len(doc)):
+                if doc[i].xref == pg_xref:
+                    page_idx = i
+                    break
+        
+        # Get MCIDs (Content items)
+        mcids = []
+        k_val = doc.xref_get_key(xref, "K")
+        if k_val[0] == 'int':
+            mcids.append(int(k_val[1]))
+        elif k_val[0] == 'array' and 'R' not in k_val[1]:
+            import re
+            mcids.extend([int(x) for x in re.findall(r'\d+', k_val[1])])
+        elif k_val[0] == 'dict' and '/MCID' in k_val[1]:
+            # Some PDFs have dicts as kids
+            import re
+            mcid_match = re.search(r'/MCID\s+(\d+)', k_val[1])
+            if mcid_match:
+                mcids.append(int(mcid_match.group(1)))
+
         # Recursively get children
         children = _parse_kids(doc, xref)
         
@@ -152,9 +183,37 @@ def _parse_struct_elem(doc: fitz.Document, xref: int) -> Optional[Dict[str, Any]
             "tag": tag,
             "title": title,
             "xref": xref,
+            "page": page_idx,
+            "mcids": mcids,
             "children": children
         }
     except Exception as e:
         logger.debug(f"Error parsing struct elem {xref}: {e}")
         return None
+
+def map_mcids_to_rects(page: fitz.Page, mcids: List[int]) -> List[fitz.Rect]:
+    """Find bounding boxes for a list of MCIDs on a page"""
+    if not mcids: return []
+    
+    rects = []
+    try:
+        # We search the page dictionary for MCIDs
+        # Note: 1.26.7 might not show them in get_text("dict") for all files,
+        # so we'll try a search-based approach or block-level checking.
+        
+        # First pass: try to find if any block matches the MCID (if available)
+        d = page.get_text("dict")
+        for block in d["blocks"]:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    # In some PyMuPDF versions, mcid is available in span
+                    if span.get("mcid") in mcids:
+                        rects.append(fitz.Rect(span["bbox"]))
+        
+        # Second pass: if no rects found and tag has a title/text, 
+        # we could search for that text, but we don't have it here.
+    except:
+        pass
+    
+    return rects
 
