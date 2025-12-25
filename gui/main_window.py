@@ -10,6 +10,8 @@ from typing import List, Optional
 from utils.logger import setup_logger
 from services.pdf_scanner import PDFScanner, discover_pdfs
 from services.report_generator import generate_html_report, generate_excel_report
+from services.report_generator import generate_html_report, generate_excel_report
+from services.pdf_annotator import PDFAnnotator
 from models.scan_result import ScanJob
 import config
 import webbrowser
@@ -30,6 +32,7 @@ class MainWindow(ctk.CTk):
         
         # Initialize services
         self.scanner = PDFScanner()
+        self.annotator = PDFAnnotator()
         self.current_job: Optional[ScanJob] = None
         self.selected_files: List[str] = []
         
@@ -65,7 +68,18 @@ class MainWindow(ctk.CTk):
             command=self._toggle_theme,
             width=120
         )
-        theme_btn.grid(row=0, column=1, padx=20, pady=15)
+        theme_btn.grid(row=0, column=1, padx=(10, 5), pady=15)
+        
+        # Open Logs button
+        logs_btn = ctk.CTkButton(
+            header,
+            text="📝 Open Logs",
+            command=self._open_logs,
+            width=120,
+            fg_color="gray50",
+            hover_color="gray40"
+        )
+        logs_btn.grid(row=0, column=2, padx=(5, 20), pady=15)
     
     def _create_main_content(self):
         """Create main content area"""
@@ -188,6 +202,17 @@ class MainWindow(ctk.CTk):
         )
         self.btn_export_excel.pack(side="left", padx=5)
         
+        self.btn_view_errors = ctk.CTkButton(
+            export_frame,
+            text="👁 View Errors",
+            command=self._view_errors,
+            width=120,
+            state="disabled",
+            fg_color="orange",
+            hover_color="darkorange"
+        )
+        self.btn_view_errors.pack(side="left", padx=5)
+        
         # Results text area
         self.results_text = ctk.CTkTextbox(
             results_frame,
@@ -205,6 +230,19 @@ class MainWindow(ctk.CTk):
         )
         self.statusbar.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
     
+    def _open_logs(self):
+        """Open the log file in default editor"""
+        log_file = config.LOGS_FOLDER / "scanner.log"
+        if log_file.exists():
+            try:
+                os.startfile(log_file)
+                logger.info("Opened log file")
+            except Exception as e:
+                logger.error(f"Failed to open log file: {e}")
+                messagebox.showerror("Error", f"Could not open log file:\n{e}")
+        else:
+            messagebox.showinfo("Info", "Log file does not exist yet.")
+
     def _toggle_theme(self):
         """Toggle between dark and light theme"""
         current = ctk.get_appearance_mode()
@@ -281,6 +319,7 @@ class MainWindow(ctk.CTk):
             self.after(0, self._update_status, "Scan complete!")
             self.after(0, lambda: self.btn_export_html.configure(state="normal"))
             self.after(0, lambda: self.btn_export_excel.configure(state="normal"))
+            self.after(0, lambda: self.btn_view_errors.configure(state="normal"))
             
         except Exception as e:
             logger.error(f"Scan failed: {e}", exc_info=True)
@@ -379,6 +418,46 @@ class MainWindow(ctk.CTk):
         except Exception as e:
             logger.error(f"Failed to export Excel: {e}", exc_info=True)
             messagebox.showerror("Export Error", f"Failed to export Excel:\n\n{str(e)}")
+    
+    def _view_errors(self):
+        """Annotate and view errors in PDF"""
+        if not self.current_job or not self.current_job.results:
+            return
+            
+        # Find first non-compliant result for now
+        # In a full app, we'd let user select which file
+        target_result = None
+        for result in self.current_job.results:
+            if not result.compliant and result.violations:
+                target_result = result
+                break
+        
+        if not target_result:
+            messagebox.showinfo("Info", "No violations found to visualize.")
+            return
+            
+        try:
+            self._update_status(f"Generatign annotations for {target_result.filename}...")
+            
+            # Run in thread to not freeze UI
+            def run_annotate():
+                try:
+                    output_path = self.annotator.annotate_pdf(
+                        target_result.filepath,
+                        target_result.violations
+                    )
+                    self.after(0, lambda: self._update_status(f"Opening annotated PDF: {Path(output_path).name}"))
+                    self.after(0, lambda: os.startfile(output_path))
+                except Exception as e:
+                    self.after(0, lambda: messagebox.showerror("Error", f"Failed to annotate PDF:\n{e}"))
+                    self.after(0, lambda: self._update_status("Annotation failed"))
+            
+            thread = threading.Thread(target=run_annotate, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            logger.error(f"Failed to initiate annotation: {e}")
+            messagebox.showerror("Error", str(e))
     
     def _update_status(self, message: str):
         """Update status bar"""

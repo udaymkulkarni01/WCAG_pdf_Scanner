@@ -30,7 +30,8 @@ MIN_JAVA_VERSION = 8
 # Logging settings
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-LOG_FILE = BASE_DIR / 'logs' / 'scanner.log'
+LOGS_FOLDER = BASE_DIR / 'logs'
+LOG_FILE = LOGS_FOLDER / 'scanner.log'
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
 LOG_BACKUP_COUNT = 5
 
@@ -44,4 +45,4 @@ COLOR_THEME = "blue"  # "blue", "green", "dark-blue"
 # Ensure directories exist
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 REPORTS_FOLDER.mkdir(parents=True, exist_ok=True)
-(BASE_DIR / 'logs').mkdir(parents=True, exist_ok=True)
+LOGS_FOLDER.mkdir(parents=True, exist_ok=True)

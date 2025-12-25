@@ -16,6 +16,9 @@ class RuleViolation:
     description: str
     failed_checks: int
     passed_checks: int
+    object_id: Optional[str] = None
+    page: Optional[int] = None
+    context: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -26,6 +29,9 @@ class RuleViolation:
             'description': self.description,
             'failed_checks': self.failed_checks,
             'passed_checks': self.passed_checks,
+            'object_id': self.object_id,
+            'page': self.page,
+            'context': self.context,
         }
     
     @classmethod
@@ -38,6 +44,9 @@ class RuleViolation:
             description=data.get('description', ''),
             failed_checks=data.get('failed_checks', 0),
             passed_checks=data.get('passed_checks', 0),
+            object_id=data.get('object_id'),
+            page=data.get('page'),
+            context=data.get('context'),
         )
 
 

@@ -273,16 +273,62 @@ def parse_validation_output(json_data: Dict, filename: str) -> Dict[str, Any]:
         
         for rule in rule_summaries:
             if rule.get('status') == 'failed' or rule.get('failedChecks', 0) > 0:
-                violation = {
-                    'rule_id': rule.get('ruleId', 'Unknown'),
-                    'specification': rule.get('specification', ''),
-                    'clause': rule.get('clause', ''),
-                    'description': rule.get('description', ''),
-                    'failed_checks': rule.get('failedChecks', 0),
-                    'passed_checks': rule.get('passedChecks', 0),
-                }
-                violations.append(violation)
-                logger.debug(f"Violation: {violation['rule_id']} - {violation['failed_checks']} failures")
+                # If individual checks are available, create a violation for each failed check
+                checks = rule.get('checks', [])
+                failed_checks = [c for c in checks if c.get('status') == 'failed']
+                
+                if failed_checks:
+                    for check in failed_checks:
+                        violation = {
+                            'rule_id': rule.get('ruleId', 'Unknown'),
+                            'specification': rule.get('specification', ''),
+                            'clause': rule.get('clause', ''),
+                            'description': rule.get('description', ''),
+                            'failed_checks': 1,
+                            'passed_checks': 0,
+                            'context': check.get('context', ''),
+                            'object_id': None, 
+                            'page': None
+                        }
+                        
+                        # Extract object ID and Page from context
+                        context = violation['context']
+                        if context:
+                            import re
+                            
+                            # Extract Object ID (e.g. "7 0 obj")
+                            # VeraPDF often formats it like "root.../pages[0](7 0 obj)"
+                            obj_match = re.search(r'(\d+)\s+0\s+obj', context)
+                            if obj_match:
+                                violation['object_id'] = f"{obj_match.group(1)} 0 obj"
+                                
+                            # Extract Page Index (e.g. "pages[0]")
+                            # Note: VeraPDF uses 0-based indexing for pages in the context path
+                            page_match = re.search(r'pages\[(\d+)\]', context)
+                            if page_match:
+                                violation['page'] = int(page_match.group(1)) + 1 # Convert to 1-based for human readability/internal consistency if needed?
+                                # Actually, fitz uses 0-based, but let's store 0-based usually.
+                                # Wait, user usually expects 1-based in UI, but existing code had page_idx logic.
+                                # Let's store 0-based index if possible, or clarify.
+                                # In the prev Step 6 (pdf_annotator logic), it tried to parse pages[...] as index.
+                                # "root/document[0]/pages[1]" -> page 1 (which is the second page)
+                                violation['page'] = int(page_match.group(1))
+
+                        violations.append(violation)
+                else:
+                    # Fallback if no individual checks are listed but rule validation failed
+                    violation = {
+                        'rule_id': rule.get('ruleId', 'Unknown'),
+                        'specification': rule.get('specification', ''),
+                        'clause': rule.get('clause', ''),
+                        'description': rule.get('description', ''),
+                        'failed_checks': rule.get('failedChecks', 0),
+                        'passed_checks': rule.get('passedChecks', 0),
+                        'context': None,
+                        'object_id': None,
+                        'page': None
+                    }
+                    violations.append(violation)
         
         result = {
             'filename': filename,
