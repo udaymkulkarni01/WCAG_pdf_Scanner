@@ -12,6 +12,7 @@ from services.pdf_scanner import PDFScanner, discover_pdfs
 from services.report_generator import generate_html_report, generate_excel_report
 from services.report_generator import generate_html_report, generate_excel_report
 from services.pdf_annotator import PDFAnnotator
+from gui.pdf_viewer_frame import PDFViewerFrame
 from models.scan_result import ScanJob
 import config
 import webbrowser
@@ -212,6 +213,17 @@ class MainWindow(ctk.CTk):
             hover_color="darkorange"
         )
         self.btn_view_errors.pack(side="left", padx=5)
+
+        self.btn_inspect = ctk.CTkButton(
+            export_frame,
+            text="🔍 Inspect In-App",
+            command=self._inspect_pdf,
+            width=120,
+            state="disabled",
+            fg_color="#00695c",
+            hover_color="#004d40"
+        )
+        self.btn_inspect.pack(side="left", padx=5)
         
         # Results text area
         self.results_text = ctk.CTkTextbox(
@@ -320,6 +332,7 @@ class MainWindow(ctk.CTk):
             self.after(0, lambda: self.btn_export_html.configure(state="normal"))
             self.after(0, lambda: self.btn_export_excel.configure(state="normal"))
             self.after(0, lambda: self.btn_view_errors.configure(state="normal"))
+            self.after(0, lambda: self.btn_inspect.configure(state="normal"))
             
         except Exception as e:
             logger.error(f"Scan failed: {e}", exc_info=True)
@@ -458,6 +471,41 @@ class MainWindow(ctk.CTk):
         except Exception as e:
             logger.error(f"Failed to initiate annotation: {e}")
             messagebox.showerror("Error", str(e))
+    
+    def _inspect_pdf(self):
+        """Open integrated PDF viewer"""
+        if not self.current_job or not self.current_job.results:
+            return
+            
+        # Find result to inspect (simplification: just first non-compliant or first)
+        target = None
+        for r in self.current_job.results:
+            if not r.compliant:
+                target = r
+                break
+        if not target:
+            target = self.current_job.results[0]
+            
+        if not target:
+            return
+
+        # Hide main frame, show viewer
+        self.main_frame.grid_remove()
+        
+        # Create viewer if needed
+        if not hasattr(self, 'pdf_viewer') or self.pdf_viewer is None:
+            self.pdf_viewer = PDFViewerFrame(self, close_callback=self._close_viewer)
+        
+        self.pdf_viewer.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.pdf_viewer.load_document(target)
+        self._update_status(f"Inspecting: {target.filename}")
+
+    def _close_viewer(self):
+        """Close viewer and show results"""
+        if hasattr(self, 'pdf_viewer') and self.pdf_viewer:
+            self.pdf_viewer.grid_remove()
+        self.main_frame.grid()
+        self._update_status("Ready")
     
     def _update_status(self, message: str):
         """Update status bar"""

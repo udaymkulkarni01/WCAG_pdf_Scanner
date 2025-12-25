@@ -59,6 +59,7 @@ class PDFResult:
     profile: str
     statement: str = ""
     violations: List[RuleViolation] = field(default_factory=list)
+    structure_tree: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
     scan_time: Optional[datetime] = None
     
@@ -92,6 +93,7 @@ class PDFResult:
             'profile': self.profile,
             'statement': self.statement,
             'violations': [v.to_dict() for v in self.violations],
+            'structure_tree': self.structure_tree,
             'total_violations': self.total_violations,
             'total_failed_checks': self.total_failed_checks,
             'error': self.error,
@@ -118,6 +120,7 @@ class PDFResult:
             profile=data.get('profile', ''),
             statement=data.get('statement', ''),
             violations=violations,
+            structure_tree=data.get('structure_tree', []),
             error=data.get('error'),
             scan_time=scan_time,
         )

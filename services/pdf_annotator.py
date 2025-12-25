@@ -52,15 +52,16 @@ class PDFAnnotator:
                 if v.page is not None:
                     page_idx = v.page
                 
-                # If page is still unknown, try to find it via Object ID scanning (expensive, fallback)
+                # If page is still unknown, try to find it via Object ID scanning
                 if page_idx == -1 and v.object_id:
-                     try:
-                        target_xref = int(v.object_id.split()[0])
-                        # Quick check: is this possibly a page object itself?
-                        # Skip for now to keep performance high
-                        pass
-                     except:
-                        pass
+                    from utils.pdf_utils import build_xref_page_map, resolve_violation_page
+                    if not hasattr(self, '_object_page_map'):
+                        self._object_page_map = build_xref_page_map(doc)
+                    
+                    resolved_page = resolve_violation_page(v, doc, self._object_page_map)
+                    if resolved_page is not None:
+                        page_idx = resolved_page
+                        logger.info(f"✓ Resolved object {v.object_id} to page {page_idx + 1}")
                 
                 # If we still don't know the page, and it's likely a structure/metadata error
                 # Treat as global error
@@ -75,18 +76,41 @@ class PDFAnnotator:
                 page = doc[page_idx]
                 
                 # 2. Try to find the object's visual location
+                # A. XREF based lookup
                 if v.object_id:
                     try:
                         xref = int(v.object_id.split()[0])
                         
-                        # Check images on page
+                        # Images
                         images = page.get_images(full=True)
                         for img in images:
-                            if img[0] == xref: # img[0] is existing xref
-                                img_rects = page.get_image_rects(xref)
-                                rects.extend(img_rects)
+                            if img[0] == xref:
+                                rects.extend(page.get_image_rects(xref))
+                        
+                        # Annotations & Widgets
+                        for ann in page.anns:
+                            if ann.xref == xref:
+                                rects.append(ann.rect)
+                        for widget in page.widgets():
+                            if widget.xref == xref:
+                                rects.append(widget.rect)
+                                
                     except Exception as e:
                         logger.debug(f"Error parsing object ID {v.object_id}: {e}")
+
+                # B. Text Search Fallback
+                if not rects and v.context:
+                    import re
+                    text_matches = re.findall(r'\((.*?)\)', v.context)
+                    if text_matches:
+                        candidates = [t for t in text_matches if len(t) > 3]
+                        if candidates:
+                            target_text = max(candidates, key=len)
+                            try:
+                                search_res = page.search_for(target_text, hit_max=5)
+                                rects.extend(search_res)
+                            except:
+                                pass
 
                 # 3. Draw Annotations on specific page
                 color = (1, 0, 0) # Red

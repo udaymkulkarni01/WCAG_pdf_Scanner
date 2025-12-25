@@ -483,7 +483,7 @@ def generate_excel_report(job: ScanJob, output_path: str = None) -> str:
         
         # Violations sheet
         ws_violations = wb.create_sheet("Violations")
-        headers_v = ["Filename", "Rule ID", "Specification", "Description", "Failed Checks"]
+        headers_v = ["Filename", "Rule ID", "Specification", "Description", "Failed Checks", "Page", "Object ID", "Context"]
         for col, header in enumerate(headers_v, start=1):
             cell = ws_violations.cell(row=1, column=col, value=header)
             cell.font = Font(bold=True)
@@ -498,6 +498,12 @@ def generate_excel_report(job: ScanJob, output_path: str = None) -> str:
                 ws_violations.cell(row=row_idx, column=3, value=violation.specification)
                 ws_violations.cell(row=row_idx, column=4, value=violation.description)
                 ws_violations.cell(row=row_idx, column=5, value=violation.failed_checks)
+                
+                # Page (1-based for users)
+                page_val = "Global" if violation.page is None else violation.page + 1
+                ws_violations.cell(row=row_idx, column=6, value=page_val)
+                ws_violations.cell(row=row_idx, column=7, value=violation.object_id or "")
+                ws_violations.cell(row=row_idx, column=8, value=violation.context or "")
                 row_idx += 1
         
         # Adjust column widths

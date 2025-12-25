@@ -298,9 +298,10 @@ def parse_validation_output(json_data: Dict, filename: str) -> Dict[str, Any]:
                             
                             # Extract Object ID (e.g. "7 0 obj")
                             # VeraPDF often formats it like "root.../pages[0](7 0 obj)"
-                            obj_match = re.search(r'(\d+)\s+0\s+obj', context)
-                            if obj_match:
-                                violation['object_id'] = f"{obj_match.group(1)} 0 obj"
+                            # We want the LAST one in the path as it's the leaf node (the specific error)
+                            obj_matches = re.findall(r'(\d+)\s+0\s+obj', context)
+                            if obj_matches:
+                                violation['object_id'] = f"{obj_matches[-1]} 0 obj"
                                 
                             # Extract Page Index (e.g. "pages[0]")
                             # Note: VeraPDF uses 0-based indexing for pages in the context path
@@ -400,7 +401,6 @@ def validate_multiple_pdfs(
     logger.info(f"Non-compliant: {sum(1 for r in results if not r.get('compliant'))}")
     
     return results
-
 
 if __name__ == "__main__":
     # Test veraPDF wrapper

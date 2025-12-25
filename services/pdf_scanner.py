@@ -9,6 +9,7 @@ from datetime import datetime
 
 from utils.logger import setup_logger, log_separator
 from utils.verapdf_wrapper import validate_pdf
+from utils.pdf_utils import build_xref_page_map, resolve_violation_page, get_logical_structure
 from models.scan_result import ScanJob, PDFResult, RuleViolation
 import config
 
@@ -61,6 +62,12 @@ class PDFScanner:
                 # Validate PDF
                 validation_result = validate_pdf(str(pdf_file))
                 
+                # Extract Structure manually (More reliable than VeraPDF CLI in some versions)
+                import fitz
+                doc_temp = fitz.open(str(pdf_file))
+                structure_tree = get_logical_structure(doc_temp)
+                doc_temp.close()
+                
                 # Convert to PDFResult
                 violations = [
                     RuleViolation.from_dict(v)
@@ -74,6 +81,7 @@ class PDFScanner:
                     profile=validation_result.get('profile', 'Unknown'),
                     statement=validation_result.get('statement', ''),
                     violations=violations,
+                    structure_tree=structure_tree,
                     error=validation_result.get('error'),
                     scan_time=datetime.now()
                 )
